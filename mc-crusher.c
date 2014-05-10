@@ -17,7 +17,8 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <netinet/in.h>
-#include <event.h>
+#include <event2/event.h>
+#include <event2/event_compat.h>
 #include <netdb.h>
 #include <pthread.h>
 #include <unistd.h>
@@ -62,7 +63,7 @@ struct connection {
 
     /* Event stuff */
     int fd;
-    struct event ev;
+    struct event *ev;
     enum conn_states state;
     short ev_flags;
 
@@ -105,13 +106,13 @@ static void client_handler(const int fd, const short which, void *arg);
 static int update_conn_event(struct connection *c, const int new_flags)
 {
     if (c->ev_flags == new_flags) return 1;
-    if (event_del(&c->ev) == -1) return 0;
+    if (event_del(c->ev) == -1) return 0;
 
     c->ev_flags = new_flags;
-    event_set(&c->ev, c->fd, new_flags, client_handler, (void *)c);
-    event_base_set(main_base, &c->ev);
+    event_set(c->ev, c->fd, new_flags, client_handler, (void *)c);
+    event_base_set(main_base, c->ev);
 
-    if (event_add(&c->ev, 0) == -1) return 0;
+    if (event_add(c->ev, 0) == -1) return 0;
     return 1;
 }
 
@@ -549,9 +550,11 @@ static int new_connection(struct connection *t)
     c->state = conn_connecting;
     c->ev_flags = EV_WRITE;
 
-    event_set(&c->ev, sock, c->ev_flags, client_handler, (void *)c);
-    event_base_set(main_base, &c->ev);
-    event_add(&c->ev, NULL);
+    c->ev = event_new(main_base, c->fd, EV_WRITE, client_handler, NULL);
+
+    event_set(c->ev, sock, c->ev_flags, client_handler, (void *)c);
+    event_base_set(main_base, c->ev);
+    event_add(c->ev, NULL);
 
     if (c->iov_count > 0) {
         c->vecs = calloc(c->iov_count, sizeof(struct iovec));
@@ -733,8 +736,8 @@ static void parse_config_line(char *line) {
     template.key_count = 200000;
     template.key_randomize = 0;
     template.key_prealloc = 1;
-    strcpy(template.ip_addr, "127.0.0.1");
-    template.port_num = 11211;
+    strcpy(template.ip_addr, "172.18.149.7");
+    template.port_num = 11212;
     template.cur_key = (uint64_t *)malloc(sizeof(uint64_t));
     *template.cur_key = 0;
 
